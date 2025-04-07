@@ -1,76 +1,37 @@
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urlencode
-import anthropic
 from datetime import datetime
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import pandas as pd
 import os
 
-from src.llm_provider import ClaudeProvider, LLMProvider
+from dotenv import load_dotenv
 
-client: LLMProvider = ClaudeProvider(api_key="") 
+from src.article import Article, get_naver_news
+from src.llm_provider import ClaudeProvider, LLMProvider, OpenAIProvider
 
-smtp_password = "password here"  # 실제 비밀번호로 대체
 
-
-def get_naver_news(query: str, num_articles: int):
-    base_url = "https://search.naver.com/search.naver"
-    params = {
-        "where": "news",
-        "query": query,
-        "sort": "0"  # 관련도순 정렬
-    }
-    url = f"{base_url}?{urlencode(params)}"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-    articles = []
-
-    for idx, news_area in enumerate(soup.select("div.news_area"), 1):
-        title_element = news_area.select_one("a.news_tit")
-        if title_element is None:
-            continue
-        article_url = title_element.get("href")
-        title = title_element.text.strip()
-        content_element = news_area.select_one("div.news_dsc")
-        if content_element is None:
-            continue
-        content = content_element.text.strip()
-        content = content.replace("\n", " ").replace("// flash 오류를 우회하기 위한 함수 추가function _flash_removeCallback() {}", "")
-        content = ' '.join(content.split())
-        articles.append({
-            "title": title,
-            "content": content,
-            "url": article_url
-        })
-        if idx == num_articles:
-            break
-    return articles
-
-def summarize_articles(articles: list):
+def summarize_articles(client: LLMProvider, articles: list[Article]):
     summaries = []
     for article in articles:
         prompt = f"""
         다음 기사를 200자 내외로 인사와 '기사를 요약하겠다'는 내용은 제외하고 친절한 말투로 요약해주세요:
-        제목: {article['title']}
-        본문: {article['content']}
+        제목: {article.title}
+        본문: {article.content}
         """
         summary = client.create(prompt)
         summaries.append(summary)
     return summaries
 
-def generate_newsletter(query, articles, summaries):
+
+def generate_newsletter(
+    client: LLMProvider, query: str, articles: list[Article], summaries: list
+):
     today = datetime.now().strftime("%m월 %d일")
     content = ""
 
     for article, summary in zip(articles, summaries):
         content += f"""
         <div style="max-width:90%;margin-left:auto;margin-right:auto;margin-top:40px" class="nomal-paragraph">
-          <div style="font-weight:bold;font-size:18px;margin-bottom:10px">{article['title']}</div>
+          <div style="font-weight:bold;font-size:18px;margin-bottom:10px">{article.title}</div>
           <div style="margin-top:20px">{summary}</div>
-          <div style="margin-top:10px"><a href="{article['url']}" target="_blank">{article['url']}</a></div>
+          <div style="margin-top:10px"><a href="{article.url}" target="_blank">{article.url}</a></div>
         </div>
         """
     # 요약된 본문 전체를 다시 하나로 묶어서 브리핑하는 문단 생성
@@ -106,42 +67,24 @@ def generate_newsletter(query, articles, summaries):
     """
     return newsletter
 
-def send_email(subject, body, from_email, to_email, smtp_server, smtp_port, smtp_username, smtp_password):
-    message = MIMEMultipart()
-    message["From"] = from_email
-    message["To"] = to_email
-    message["Subject"] = subject
-
-    message.attach(MIMEText(body, "html"))
-
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_username, smtp_password)
-        server.send_message(message)
 
 # 테스트
 if __name__ == "__main__":
+    load_dotenv()
+    # api_key = os.getenv("ANTHROPIC_API_KEY")
+    # if not api_key:
+    #     raise EnvironmentError("ANTHROPIC_API_KEY is not set")
+    # client: LLMProvider = ClaudeProvider(api_key=api_key)
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise EnvironmentError("OPENAI_API_KEY is not set")
+    client: LLMProvider = OpenAIProvider(api_key=api_key)
+
     query = "UI+UX"
-    num_articles = 5
+    num_articles = 1
 
     articles = get_naver_news(query, num_articles)
-    summaries = summarize_articles(articles)
+    summaries = summarize_articles(client, articles)
 
-    newsletter = generate_newsletter(query, articles, summaries)
-
-    # 이메일 발송 정보
-    subject = f"{datetime.now().strftime('%m월 %d일')} {query} 관련 주요 기사"
-    from_email = ""
-    smtp_server = "smtp.gmail.com"
-    smtp_port = 587
-    smtp_username = ""
-    smtp_password = ""
-
-    # 받는 사람 이메일 리스트 읽기
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    xlsx_file = os.path.join(current_dir, "list.xlsx")
-    to_emails = pd.read_excel(xlsx_file)["e-mail"].tolist()
-
-    # 메일 발송
-    for to_email in to_emails:
-        send_email(subject, newsletter, from_email, to_email, smtp_server, smtp_port, smtp_username, smtp_password)
+    newsletter = generate_newsletter(client, query, articles, summaries)
+    print(newsletter)

@@ -1,6 +1,7 @@
 from typing import Protocol
 
 import anthropic
+from openai import OpenAI
 
 
 class LLMProvider(Protocol):
@@ -22,4 +23,19 @@ class ClaudeProvider(LLMProvider):
             return message.content[0].text.strip()  # type: ignore
         except Exception as e:
             print(e)
+            return ""
+        
+class OpenAIProvider(LLMProvider):
+    def __init__(self, api_key: str):
+        self.client = OpenAI(api_key=api_key)
+
+    def create(self, prompt: str) -> str:
+        try:
+            response = self.client.responses.create(
+                model="gpt-4o",
+                input=prompt,
+            )
+            return response.output_text
+        except Exception as e:
+            print(f"[OpenAIProvider Error] {e}")
             return ""
