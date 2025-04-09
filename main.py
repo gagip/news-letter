@@ -2,10 +2,16 @@ import os
 from datetime import datetime
 
 from dotenv import load_dotenv
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from src.article import Article, get_naver_news
 from src.llm_provider import ClaudeProvider, LLMProvider, OpenAIProvider
 from src.mail import send_email
+
+jinja_env = Environment(
+    loader=FileSystemLoader("templates"),
+    autoescape=select_autoescape(["html", "xml"]),
+)
 
 
 def summarize_articles(client: LLMProvider, articles: list[Article]):
@@ -25,16 +31,7 @@ def generate_newsletter(
     client: LLMProvider, query: str, articles: list[Article], summaries: list
 ):
     today = datetime.now().strftime("%m월 %d일")
-    content = ""
-
-    for article, summary in zip(articles, summaries):
-        content += f"""
-        <div style="max-width:90%;margin-left:auto;margin-right:auto;margin-top:40px" class="nomal-paragraph">
-          <div style="font-weight:bold;font-size:18px;margin-bottom:10px">{article.title}</div>
-          <div style="margin-top:20px">{summary}</div>
-          <div style="margin-top:10px"><a href="{article.url}" target="_blank">{article.url}</a></div>
-        </div>
-        """
+    
     # 요약된 본문 전체를 다시 하나로 묶어서 브리핑하는 문단 생성
     prompt = f"""
     다음 기사 요약들을 하나로 묶어서 전체 뉴스레터에 대해 브리핑하는 문단을 300자 내외로 생성해주세요:
@@ -44,29 +41,23 @@ def generate_newsletter(
     """
     briefing = client.create(prompt)
 
-    newsletter = f"""
-    <div style="width:100%">
-      <div style="max-width:600px;margin:0 auto;padding:60px 0 30px 0;font-family:'Roboto',Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5;border:1px solid #e2e2e2">
-        <div align="center" style="padding-right:0px;padding-left:0px;background-color:#000000;padding:20px 0" class="logo-area">
-          <h1 style="color:#ffffff;font-size:48px;margin:0">DECK</h1>
-          <h2 style="color:#ffffff;font-size:24px;margin:0">NEWSLETTER</h2>
-        </div>
-        <hr style="border:0;border-top:solid 1px #e2e2e2;width:90%;margin:30px auto" class="horizontal-line">
-        <div style="max-width:90%;margin-left:auto;margin-right:auto;margin-top:40px" class="nomal-paragraph">
-          <div style="margin-top:20px">{today} {query} 관련 주요 기사입니다.</div>
-          <div style="margin-top:20px">{briefing}</div>
-        </div>
-        {content}
-        <div align="center" style="padding-top:40px;padding-right:10px;padding-bottom:10px;padding-left:10px">
-          <a href="https://k-enterworld.com" style="text-decoration-line: none; display: inline-block; color: rgb(255, 255, 255); background-color: rgb(0, 0, 0); border-radius: 60px; width: auto; border-width: 1px; border-style: solid; border-color: rgb(0, 0, 0); padding: 10px 25px;" target="_blank">Learn More</a>
-        </div>
-        <div style="text-align:center;">
-          <a style="font-size:12px;color:silver" href="mailto:your@email.com?subject=Unsubscribe!&amp;body=I&nbsp;don't&nbsp;want&nbsp;to&nbsp;receive&nbsp;an&nbsp;email&nbsp;from&nbsp;your&nbsp;service!" target="_blank">Unsubscribe from emails</a>
-        </div>
-      </div>
-    </div>
-    """
-    return newsletter
+    # 각 기사에 대해 article block 렌더링
+    article_block_template = jinja_env.get_template("article_block.html")
+    article_blocks = [
+        article_block_template.render(article=article, summary=summary)
+        for article, summary in zip(articles, summaries)
+    ]
+
+    # 전체 뉴스레터 렌더링
+    newsletter_template = jinja_env.get_template("newsletter.html")
+    rendered_html = newsletter_template.render(
+        today=today,
+        query=query,
+        briefing=briefing,
+        article_blocks=article_blocks
+    )
+
+    return rendered_html
 
 
 def send_news_letter(subject: str, body: str, to_emails: list[str]):
