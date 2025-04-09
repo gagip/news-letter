@@ -1,10 +1,11 @@
-from datetime import datetime
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 
 from src.article import Article, get_naver_news
 from src.llm_provider import ClaudeProvider, LLMProvider, OpenAIProvider
+from src.mail import send_email
 
 
 def summarize_articles(client: LLMProvider, articles: list[Article]):
@@ -68,6 +69,27 @@ def generate_newsletter(
     return newsletter
 
 
+def send_news_letter(subject: str, body: str, to_emails: list[str]):
+    provider = os.getenv("SMTP_PROVIDER")
+    if not provider:
+        raise EnvironmentError("SMTP_PROVIDER 정보가 존재하지 않습니다")
+    email = os.getenv("SMTP_EMAIL")
+    if not email:
+        raise EnvironmentError("SMTP_EMAIL 정보가 존재하지 않습니다")
+    password = os.getenv("SMTP_PASSWORD")
+    if not password:
+        raise EnvironmentError("SMTP_PASSWORD 정보가 존재하지 않습니다")
+
+    send_email(
+        provider=provider,
+        email=email,
+        password=password,
+        subject=subject,
+        body=body,
+        to_emails=to_emails,
+    )
+
+
 # 테스트
 if __name__ == "__main__":
     load_dotenv()
@@ -88,3 +110,9 @@ if __name__ == "__main__":
 
     newsletter = generate_newsletter(client, query, articles, summaries)
     print(newsletter)
+
+    send_news_letter(
+        subject="new letter test",
+        body=newsletter,
+        to_emails=["test@email.com"],
+    )
